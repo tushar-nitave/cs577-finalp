@@ -1,34 +1,114 @@
 """
-Course: Deep Learning CS577
-Task: CRNN model
+@author: Tushar Nitave (https://www.github.com/tushar-nitave)
+        Jasmeet Narang ()
 
+Course: Deep Learning CS577 Spring 20
+
+Task: CRNN model for Scene Text Recognition
+
+Date: April 26 2020
 """
+
+import sys
+
 import xml.etree.ElementTree as ET
 import pandas as pd
 import os
 import shutil
+import numpy as np
+import random
 
 from keras import layers
 from keras import backend as K
 from keras.layers.recurrent import LSTM
-from keras.layers import  Conv2D, MaxPool2D
+from keras.layers import  Conv2D, MaxPooling2D, concatenate
 from keras.layers import Input, Dense, Activation
 from keras.layers import Reshape, Lambda, BatchNormalization
 from keras.layers.merge import add
 from keras.models import  Model
+
+import cv2
 from PIL import Image
 from keras.preprocessing.image import  ImageDataGenerator
 
-import cv2
-import numpy as np
-
-import pathlib
+from parameter import *
 
 
-chars = "adefghjknqrstwABCDEFGHIJKLMNOPZ0123456789"
-letters = [letter for letter in chars]
-num_classes = len(letters)+1
-max_text_len = 9
+def labels_to_text(labels):
+    return ''.join(list(map(lambda x: letters[int(x)], labels)))
+
+
+def text_to_labels(text):
+    return list(map(lambda x: letters.index(x), text))
+
+
+class TextImageGenerator:
+
+    def __init__(self, img_dirpath, img_w, img_h, batch_size, downsample_factor, max_len=9):
+
+        self.img_h = img_h
+        self.img_w = img_w
+        self.batch_size = batch_size
+        self.max_len = max_len
+        self.downsample_factor = downsample_factor
+        self.img_dirpath = img_dirpath
+        self.img_dir = os.listdir(self.img_dirpath)
+        self.n = len(self.img_dir)
+        self.indexes = list(range(self.n))
+        self.cur_index = 0
+        self.imgs = np.zeros((self.n, self.img_h, self.img_w))
+        self.texts = []
+
+    def build_data(self):
+
+        print("\nBuilding data started..")
+        text_data = pd.read_csv("../data/data.csv")
+
+        for i, img_file in enumerate(self.img_dir):
+            img = cv2.imread(os.path.join(self.img_dirpath,img_file), cv2.IMREAD_GRAYSCALE)
+            img = cv2.resize(img, (self.img_w, self.img_h))
+            img = img.astype(np.float32)
+            img = (img/255.0) * 2 - 1  # why ?
+
+            self.imgs[i, :, :] = img
+            self.texts.append(text_data.iloc[i:i+1,1:2].values[0][0])
+        print(len(self.texts)==self.n)
+        print("\nBuild finished")
+
+    def next_sample(self):
+        self.cur_index += 1
+        if self.cur_index > self.n:
+            self.cur_index = 0
+            random.shuffle(self.indexes)
+        return self.imgs[self.indexes[self.cur_index]], self.texts[self.indexes[self.cur_index]]
+
+    def next_batch(self):
+        while True:
+            x_data = np.ones([self.batch_size, self.img_w, self.img_h, 1])
+            y_data = np.ones([self.batch_size, self.max_len])
+            input_length = np.ones((self.batch_size, 1)) * (self.img_w // self.downsample_factor - 2)
+            label_length = np.zeros((self.batch_size, 1))
+
+            for i in range(self.batch_size):
+                img, text = self.next_sample()
+                img = img.T
+                img = np.expand_dims(img, -1)
+                x_data[i] = img
+                text = text[:9]
+                y_data[i] = text_to_labels(text.zfill(self.max_len))
+                label_length[i] = len(text)
+
+            inputs = {
+
+                    'the_input': x_data,
+                    'the_labels': y_data,
+                    'input_length': input_length,
+                    'label_length': label_length
+            }
+
+            outputs = {'ctc': np.zeros([self.batch_size])}
+
+            yield (inputs, outputs)
 
 
 def ctc_lambda_func(args):
@@ -37,48 +117,84 @@ def ctc_lambda_func(args):
     return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
 
 
-def get_model():
-    """
-    Building CRNN architecture
-    :return: model
-    """
+def get_Model(training):
+    input_shape = (img_w, img_h, 1)  # (128, 64, 1)
 
-    inputs = Input(name="the_input", shape=(64, 64, 3), dtype='float32')
-    print("1")
-    inner = Conv2D(64, (3,3), padding='same', name='conv1', kernel_initializer='he_normal')(inputs)
-    print("2")
+    # Make Networkw
+    inputs = Input(name='the_input', shape=input_shape, dtype='float32')  # (None, 128, 64, 1)
+
+    # Convolution layer (VGG)
+    inner = Conv2D(64, (3, 3), padding='same', name='conv1', kernel_initializer='he_normal')(
+        inputs)  # (None, 128, 64, 64)
     inner = BatchNormalization()(inner)
-    print("3")
     inner = Activation('relu')(inner)
-    print("4")
-    inner = MaxPool2D(pool_size=(2,2), name='max1')(inner)
-    print("5")
-    inner = Reshape(target_shape=((32, 2048)), name="reshape")(inner)
-    print("6")
-    lstm_1 = LSTM(8, return_sequences=True, kernel_initializer='he_normal', name="lstm1")(inner)
-    print("7")
-    lstm_1b = LSTM(8, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='lstm1_b')(inner)
-    print("8")
-    reversed_lstm_1b = Lambda(lambda inputTensor: K.reverse(inputTensor, axes=1))(lstm_1b)
-    print("9")
-    lstm_1_merged = add([lstm_1, reversed_lstm_1b])
-    print("10")
-    lstm_1_merged = BatchNormalization()(lstm_1_merged)
-    print("11")
+    inner = MaxPooling2D(pool_size=(2, 2), name='max1')(inner)  # (None,64, 32, 64)
 
-    inner = Dense(num_classes, kernel_initializer='he_normal', name="dense2")(lstm_1_merged)
-    print("12")
-    y_pred = Activation('softmax', name="softmax")(inner)
-    print("13")
-    labels = Input(name="the_labels", shape=[9], dtype='float32')
-    print("14")
-    input_length = Input(name="input_length", shape=[1], dtype="int64")
-    print("15")
-    label_length = Input(name="label_length", shape=[1], dtype="int64")
-    print("16")
-    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name="ctc")([y_pred, labels, input_length, label_length])
-    print("17")
-    return Model(inputs=[inputs, labels, input_length, label_length], outputs=loss_out)
+    inner = Conv2D(128, (3, 3), padding='same', name='conv2', kernel_initializer='he_normal')(
+        inner)  # (None, 64, 32, 128)
+    inner = BatchNormalization()(inner)
+    inner = Activation('relu')(inner)
+    inner = MaxPooling2D(pool_size=(2, 2), name='max2')(inner)  # (None, 32, 16, 128)
+
+    inner = Conv2D(256, (3, 3), padding='same', name='conv3', kernel_initializer='he_normal')(
+        inner)  # (None, 32, 16, 256)
+    inner = BatchNormalization()(inner)
+    inner = Activation('relu')(inner)
+    inner = Conv2D(256, (3, 3), padding='same', name='conv4', kernel_initializer='he_normal')(
+        inner)  # (None, 32, 16, 256)
+    inner = BatchNormalization()(inner)
+    inner = Activation('relu')(inner)
+    inner = MaxPooling2D(pool_size=(1, 2), name='max3')(inner)  # (None, 32, 8, 256)
+
+    inner = Conv2D(512, (3, 3), padding='same', name='conv5', kernel_initializer='he_normal')(
+        inner)  # (None, 32, 8, 512)
+    inner = BatchNormalization()(inner)
+    inner = Activation('relu')(inner)
+    inner = Conv2D(512, (3, 3), padding='same', name='conv6')(inner)  # (None, 32, 8, 512)
+    inner = BatchNormalization()(inner)
+    inner = Activation('relu')(inner)
+    inner = MaxPooling2D(pool_size=(1, 2), name='max4')(inner)  # (None, 32, 4, 512)
+
+    inner = Conv2D(512, (2, 2), padding='same', kernel_initializer='he_normal', name='con7')(
+        inner)  # (None, 32, 4, 512)
+    inner = BatchNormalization()(inner)
+    inner = Activation('relu')(inner)
+
+    # CNN to RNN
+    inner = Reshape(target_shape=((32, 2048)), name='reshape')(inner)  # (None, 32, 2048)
+    inner = Dense(64, activation='relu', kernel_initializer='he_normal', name='dense1')(inner)  # (None, 32, 64)
+
+    # RNN layer
+    lstm_1 = LSTM(256, return_sequences=True, kernel_initializer='he_normal', name='lstm1')(inner)  # (None, 32, 512)
+    lstm_1b = LSTM(256, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='lstm1_b')(inner)
+    reversed_lstm_1b = Lambda(lambda inputTensor: K.reverse(inputTensor, axes=1))(lstm_1b)
+
+    lstm1_merged = add([lstm_1, reversed_lstm_1b])  # (None, 32, 512)
+    lstm1_merged = BatchNormalization()(lstm1_merged)
+
+    lstm_2 = LSTM(256, return_sequences=True, kernel_initializer='he_normal', name='lstm2')(lstm1_merged)
+    lstm_2b = LSTM(256, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='lstm2_b')(
+        lstm1_merged)
+    reversed_lstm_2b = Lambda(lambda inputTensor: K.reverse(inputTensor, axes=1))(lstm_2b)
+
+    lstm2_merged = concatenate([lstm_2, reversed_lstm_2b])  # (None, 32, 1024)
+    lstm2_merged = BatchNormalization()(lstm2_merged)
+
+    # transforms RNN output to character activations:
+    inner = Dense(num_classes, kernel_initializer='he_normal', name='dense2')(lstm2_merged)  # (None, 32, 63)
+    y_pred = Activation('softmax', name='softmax')(inner)
+
+    labels = Input(name='the_labels', shape=[max_text_len], dtype='float32')  # (None ,8)
+    input_length = Input(name='input_length', shape=[1], dtype='int64')  # (None, 1)
+    label_length = Input(name='label_length', shape=[1], dtype='int64')  # (None, 1)
+
+    # Keras doesn't currently support loss funcs with extra parameters
+    # so CTC loss is implemented in a lambda layer
+    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')(
+        [y_pred, labels, input_length, label_length])  # (None, 1)
+
+    if training:
+        return Model(inputs=[inputs, labels, input_length, label_length], outputs=loss_out)
 
 
 if __name__ == "__main__":
@@ -93,37 +209,41 @@ if __name__ == "__main__":
 
     labels = pd.DataFrame(labels)
     labels.to_csv("../data/data.csv")
-    # print(labels)
 
     # get images from all the directories
 
-    # os.mkdir("../data/train/")
     path = "../data/word_train/word"
     for directory in os.listdir(path):
         for image in os.listdir(os.path.join(path, directory)):
             src = os.path.join(path, directory)
             shutil.copy(os.path.join(src, image), "../data/train/")
 
-    #  resize all the train images
-    for image in os.listdir("../data/train/"):
-        img = cv2.imread(os.path.join("../data/train", image))
-        img = cv2.resize(img, (64, 64))
-        cv2.imwrite(image, img)
+    # #  resize all the train images
+    # for image in os.listdir("../data/train/"):
+    #     img = cv2.imread(os.path.join("../data/train", image))
+    #     print(img)
+        # img = cv2.resize(img, (64, 64))
+        # cv2.imwrite(image, img)
 
+    # train_data = []
+    #
+    # for image in os.listdir("../data/train"):
+    #     path = os.path.join("../data/train", image)
+    #     img = Image.open(path)
+    #     img = img.resize((64, 64))
+    #     train_data.append(np.array(img))
 
-    train_data = []
+    # train_data = np.array(train_data)
 
-    for image in os.listdir("../data/train"):
-        path = os.path.join("../data/train", image)
-        img = Image.open(path)
-        img = img.resize((64, 64))
-        train_data.append(np.array(img))
+    model = get_Model(training=True)
 
-    train_data = np.array(train_data)
-    print(train_data.shape)
-    model = get_model()
+    dir_path = "../data/train/"
+    train = TextImageGenerator(dir_path, img_w, img_h, batch_size, downsample_factor)
+    train.build_data()
 
     model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer="adam")
 
-    model.fit(train_data[:1], np.array(labels), epochs=20)
+    model.fit_generator(generator=train.next_batch(),
+                        steps_per_epoch=int(train.n/batch_size),
+                        epochs=1)
 
