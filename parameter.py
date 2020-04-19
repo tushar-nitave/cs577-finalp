@@ -1,4 +1,5 @@
-CHAR_VECTOR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.,;'[]=?/!@#$%^&*()_\""
+CHAR_VECTOR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.,;:><{}'|~`[]=?/!@#$%^&*()_\"\xa3\xc3\x89\xe9\xa9\x91\xd1\xc9`"
+
 
 letters = [letter for letter in CHAR_VECTOR]
 
