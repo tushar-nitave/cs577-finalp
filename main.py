@@ -62,7 +62,7 @@ class TextImageGenerator:
     def build_data(self):
 
         print("\nBuilding data started..")
-        text_data = pd.read_csv("../data/data.csv")
+        text_data = pd.read_csv("data/data.csv")
 
         for i, img_file in enumerate(self.img_dir):
             img = cv2.imread(os.path.join(self.img_dirpath,img_file), cv2.IMREAD_GRAYSCALE)
@@ -77,7 +77,7 @@ class TextImageGenerator:
 
     def next_sample(self):
         self.cur_index += 1
-        if self.cur_index > self.n:
+        if self.cur_index >= self.n:
             self.cur_index = 0
             random.shuffle(self.indexes)
         return self.imgs[self.indexes[self.cur_index]], self.texts[self.indexes[self.cur_index]]
@@ -200,23 +200,23 @@ def get_Model(training):
 if __name__ == "__main__":
 
     # extract labels from xml file
-    data = ET.parse("../data/word_train/word.xml")
+#    data = ET.parse("../data/word_train/word.xml")
 
     labels = []
 
-    for child in data.getroot():
-        labels.append(child.attrib['tag'])
+ #   for child in data.getroot():
+  #      labels.append(child.attrib['tag'])
 
-    labels = pd.DataFrame(labels)
-    labels.to_csv("../data/data.csv")
+   # labels = pd.DataFrame(labels)
+    #labels.to_csv("../data/data.csv")
 
     # get images from all the directories
 
-    path = "../data/word_train/word"
-    for directory in os.listdir(path):
-        for image in os.listdir(os.path.join(path, directory)):
-            src = os.path.join(path, directory)
-            shutil.copy(os.path.join(src, image), "../data/train/")
+    #path = "../data/word_train/word"
+    #for directory in os.listdir(path):
+     #   for image in os.listdir(os.path.join(path, directory)):
+      #      src = os.path.join(path, directory)
+       #     shutil.copy(os.path.join(src, image), "../data/train/")
 
     # #  resize all the train images
     # for image in os.listdir("../data/train/"):
@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
     model = get_Model(training=True)
 
-    dir_path = "../data/train/"
+    dir_path = "data/train/"
     train = TextImageGenerator(dir_path, img_w, img_h, batch_size, downsample_factor)
     train.build_data()
 
@@ -245,5 +245,5 @@ if __name__ == "__main__":
 
     model.fit_generator(generator=train.next_batch(),
                         steps_per_epoch=int(train.n/batch_size),
-                        epochs=1)
+                        epochs=70)
 
