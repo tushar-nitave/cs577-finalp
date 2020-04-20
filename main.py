@@ -9,12 +9,8 @@ Task: CRNN model for Scene Text Recognition
 Date: April 26 2020
 """
 
-import sys
-
-import xml.etree.ElementTree as ET
 import pandas as pd
 import os
-import shutil
 import numpy as np
 import random
 
@@ -26,10 +22,10 @@ from keras.layers import Input, Dense, Activation
 from keras.layers import Reshape, Lambda, BatchNormalization
 from keras.layers.merge import add
 from keras.models import  Model
+from tensorflow import keras
 
 import cv2
-from PIL import Image
-from keras.preprocessing.image import  ImageDataGenerator
+import matplotlib.pyplot as plt
 
 from parameter import *
 
@@ -60,18 +56,22 @@ class TextImageGenerator:
         self.texts = []
 
     def build_data(self):
-
+        dir = "../data"
         print("\nBuilding data started..")
-        text_data = pd.read_csv("../data/data.csv")
+
+        if str(os.path.basename(os.path.normpath(self.img_dirpath))) == "train":
+            text_data = pd.read_csv(os.path.join(dir, "train_label.csv"), header=None)
+        if str(os.path.basename(os.path.normpath(self.img_dirpath))) == "val":
+            text_data = pd.read_csv(os.path.join(dir, "val_label.csv"), header=None)
 
         for i, img_file in enumerate(self.img_dir):
-            img = cv2.imread(os.path.join(self.img_dirpath,img_file), cv2.IMREAD_GRAYSCALE)
+            img = cv2.imread(os.path.join(self.img_dirpath, img_file), cv2.IMREAD_GRAYSCALE)
             img = cv2.resize(img, (self.img_w, self.img_h))
             img = img.astype(np.float32)
             img = (img/255.0) * 2 - 1  # why ?
 
             self.imgs[i, :, :] = img
-            self.texts.append(text_data.iloc[i:i+1,1:2].values[0][0])
+            self.texts.append(text_data.iloc[i:i+1,0:1].values[0][0])
         print(len(self.texts)==self.n)
         print("\nBuild finished")
 
@@ -199,51 +199,26 @@ def get_Model(training):
 
 if __name__ == "__main__":
 
-    # extract labels from xml file
-    data = ET.parse("../data/word_train/word.xml")
-
-    labels = []
-
-    for child in data.getroot():
-        labels.append(child.attrib['tag'])
-
-    labels = pd.DataFrame(labels)
-    labels.to_csv("../data/data.csv")
-
-    # get images from all the directories
-
-    path = "../data/word_train/word"
-    for directory in os.listdir(path):
-        for image in os.listdir(os.path.join(path, directory)):
-            src = os.path.join(path, directory)
-            shutil.copy(os.path.join(src, image), "../data/train/")
-
-    # #  resize all the train images
-    # for image in os.listdir("../data/train/"):
-    #     img = cv2.imread(os.path.join("../data/train", image))
-    #     print(img)
-        # img = cv2.resize(img, (64, 64))
-        # cv2.imwrite(image, img)
-
-    # train_data = []
-    #
-    # for image in os.listdir("../data/train"):
-    #     path = os.path.join("../data/train", image)
-    #     img = Image.open(path)
-    #     img = img.resize((64, 64))
-    #     train_data.append(np.array(img))
-
-    # train_data = np.array(train_data)
-
     model = get_Model(training=True)
 
+    # prepare train data
     dir_path = "../data/train/"
     train = TextImageGenerator(dir_path, img_w, img_h, batch_size, downsample_factor)
     train.build_data()
 
+    # prepare validation data
+    dir_path = "../data/val/"
+    val = TextImageGenerator(dir_path, img_w, img_h, val_batch_size, downsample_factor)
+    val.build_data()
+
     model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer="adam")
-
-    model.fit_generator(generator=train.next_batch(),
+    history = model.fit_generator(generator=train.next_batch(),
                         steps_per_epoch=int(train.n/batch_size),
-                        epochs=1)
+                        epochs=1,
+                        validation_data=train.next_batch(),
+                        validation_steps=int(val.n/val_batch_size))
 
+    history = history.history
+
+    epochs = range(1, len(history['loss'])+1)
+    plt.show(epochs, history['loss'])
