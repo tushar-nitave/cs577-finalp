@@ -56,7 +56,7 @@ class TextImageGenerator:
         self.texts = []
 
     def build_data(self):
-        dir = "../data"
+        dir = "data"
         print("\nBuilding data started..")
 
         if str(os.path.basename(os.path.normpath(self.img_dirpath))) == "train":
@@ -202,23 +202,29 @@ if __name__ == "__main__":
     model = get_model(training=True)
 
     # prepare train data
-    dir_path = "../data/train/"
+    dir_path = "data/train/"
     train = TextImageGenerator(dir_path, img_w, img_h, batch_size, downsample_factor)
     train.build_data()
 
     # prepare validation data
-    dir_path = "../data/val/"
+    dir_path = "data/val/"
     val = TextImageGenerator(dir_path, img_w, img_h, val_batch_size, downsample_factor)
     val.build_data()
 
+    print("\n# of training samples: {}".format(train.n))
+    print("\n# of validation samples: {}\n".format(val.n))
+    print(int(val.n/val_batch_size))
     model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer="adam")
     history = model.fit_generator(generator=train.next_batch(),
                         steps_per_epoch=int(train.n/batch_size),
                         epochs=1,
-                        validation_data=train.next_batch(),
+                        validation_data=val.next_batch(),
                         validation_steps=int(val.n/val_batch_size))
 
     history = history.history
 
     epochs = range(1, len(history['loss'])+1)
-    plt.show(epochs, history['loss'])
+    plt.plot(epochs, history['loss'], label="train loss")
+    plt.plot(epochs, history['val_loss'], label="val loss")
+    plt.legend()
+    plt.savefig("model.png")
