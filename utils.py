@@ -1,3 +1,6 @@
+"""
+This is a utiliy module which consists of various parameters required in main method.
+"""
 CHAR_VECTOR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-.,;:><{}'|~`[]=?/!@#$%^&*()_\"\xa3\xc3\x89\xe9\xa9\x91\xd1\xc9\xb4` \\\n"
 
 letters = [letter for letter in CHAR_VECTOR]
